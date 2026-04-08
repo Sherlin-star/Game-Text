@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2D Platformer Prototype</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+        }
+        
+        .game-container {
+            position: relative;
+            display: inline-block;
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+            background: #1a1a1a;
+            padding: 20px;
+        }
+        
+        canvas {
+            display: block;
+            background: linear-gradient(180deg, #667eea 0%, #764ba2 100%);
+            border-radius: 10px;
+        }
+        
+        .score {
+            position: absolute;
+            top: 25px;
+            left: 30px;
+            font-size: 20px;
+            font-weight: bold;
+            color: #ffffff;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+            z-index: 10;
+        }
+        
+        .lives {
+            position: absolute;
+            top: 25px;
+            right: 30px;
+            font-size: 20px;
+            font-weight: bold;
+            color: #ffffff;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+            z-index: 10;
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="score">Score: <span id="score">0</span></div>
+        <div class="lives">Lives: <span id="lives">3</span></div>
+        <canvas id="gameCanvas" width="800" height="600"></canvas>
+        <div id="gameOver" style="display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0, 0, 0, 0.8); color: white; padding: 30px; border-radius: 15px; text-align: center; z-index: 20;">
+            <h2>Game Over</h2>
+            <p>Final Score: <span id="finalScore">0</span></p>
+            <button onclick="resetGame()" style="margin-top: 20px; padding: 10px 20px; background: #3498db; color: white; border: none; border-radius: 5px; cursor: pointer;">Play Again</button>
+        </div>
+    </div>
+    
+    <script>
+        // Game variables
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreElement = document.getElementById('score');
+        const livesElement = document.getElementById('lives');
+        const gameOverElement = document.getElementById('gameOver');
+        const finalScoreElement = document.getElementById('finalScore');
+        let gameRunning = true;
+        
+        // Player properties
+        const player = {
+            x: 100,
+            y: 100,
+            width: 30,
+            height: 30,
+            velocityX: 0,
+            velocityY: 0,
+            speed: 5,
+            jumpForce: -15,
+            gravity: 0.4,
+            friction: 0.8,
+            onGround: false,
+            canJump: true,
+            lives: 3
+        };
+        
+        // Platforms
+        const platforms = [
+            { x: 0, y: 550, width: 800, height: 50 },    // Ground
+            { x: 200, y: 450, width: 200, height: 20 },  // Platform 1
+            { x: 500, y: 350, width: 150, height: 20 },  // Platform 2
+            { x: 100, y: 250, width: 150, height: 20 },  // Platform 3
+            { x: 600, y: 150, width: 150, height: 20 }   // Platform 4
+        ];
+        
+        // Stars
+        const stars = [
+            { x: 250, y: 420, width: 20, height: 20, collected: false, velocityX: 1, velocityY: 1 },
+            { x: 550, y: 320, width: 20, height: 20, collected: false, velocityX: -1, velocityY: 1 },
+            { x: 150, y: 220, width: 20, height: 20, collected: false, velocityX: 1, velocityY: -1 }
+        ];
+        
+        // Score
+        let score = 0;
+        
+        // Time variables
+        let lastStarTime = 0;
+        const starTimeLimit = 10000; // 10 seconds
+        
+        // Keyboard controls
+        const keys = {
+            a: false,
+            d: false,
+            w: false
+        };
+        
+        // Event listeners for keyboard
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'a') keys.a = true;
+            if (e.key === 'd') keys.d = true;
+            if (e.key === 'w') keys.w = true;
+        });
+        
+        document.addEventListener('keyup', (e) => {
+            if (e.key === 'a') keys.a = false;
+            if (e.key === 'd') keys.d = false;
+            if (e.key === 'w') keys.w = false;
+        });
+        
+        // Update player position and physics
+        function updatePlayer(timestamp) {
+            if (!gameRunning) return;
+            
+            // Check time limit for star collection
+            if (timestamp - lastStarTime > starTimeLimit) {
+                gameOver();
+                return;
+            }
+            
+            // Apply friction
+            player.velocityX *= player.friction;
+            
+            // Handle horizontal movement
+            if (keys.a) {
+                player.velocityX = -player.speed;
+            }
+            if (keys.d) {
+                player.velocityX = player.speed;
+            }
+            
+            // Handle jumping
+            if (keys.w && player.canJump && player.onGround) {
+                player.velocityY = player.jumpForce;
+                player.canJump = false;
+            }
+            
+            // Apply gravity
+            player.velocityY += player.gravity;
+            
+            // Update position
+            player.x += player.velocityX;
+            player.y += player.velocityY;
+            
+            // Check for collisions with platforms
+            player.onGround = false;
+            platforms.forEach(platform => {
+                if (
+                    player.x < platform.x + platform.width &&
+                    player.x + player.width > platform.x &&
+                    player.y < platform.y + platform.height &&
+                    player.y + player.height > platform.y &&
+                    player.velocityY > 0
+                ) {
+                    player.y = platform.y - player.height;
+                    player.velocityY = 0;
+                    player.onGround = true;
+                    player.canJump = true;
+                }
+            });
+            
+            // Move stars
+            stars.forEach(star => {
+                if (!star.collected) {
+                    // Update star position
+                    star.x += star.velocityX;
+                    star.y += star.velocityY;
+                    
+                    // Bounce off walls
+                    if (star.x <= 0 || star.x + star.width >= canvas.width) {
+                        star.velocityX *= -1;
+                    }
+                    if (star.y <= 0 || star.y + star.height >= canvas.height) {
+                        star.velocityY *= -1;
+                    }
+                }
+            });
+            
+            // Check for collisions with stars
+            let allStarsCollected = true;
+            stars.forEach(star => {
+                if (!star.collected) {
+                    allStarsCollected = false;
+                    if (
+                        player.x < star.x + star.width &&
+                        player.x + player.width > star.x &&
+                        player.y < star.y + star.height &&
+                        player.y + player.height > star.y
+                    ) {
+                        star.collected = true;
+                        score += 10;
+                        scoreElement.textContent = score;
+                        lastStarTime = timestamp; // Reset time limit
+                    }
+                }
+            });
+            
+            // Respawn stars if all collected
+            if (allStarsCollected) {
+                stars.forEach(star => {
+                    star.collected = false;
+                });
+            }
+            
+            // Reset player if falling off bottom
+            if (player.y > canvas.height) {
+                player.lives--;
+                livesElement.textContent = player.lives;
+                
+                if (player.lives <= 0) {
+                    gameOver();
+                    return;
+                }
+                
+                player.x = 100;
+                player.y = 100;
+                player.velocityX = 0;
+                player.velocityY = 0;
+            }
+        }
+        
+        // Draw game elements
+        function draw() {
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw platforms
+            ctx.fillStyle = '#8B4513';
+            platforms.forEach(platform => {
+                ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+            });
+            
+            // Draw stars
+            ctx.fillStyle = '#FFD700';
+            stars.forEach(star => {
+                if (!star.collected) {
+                    ctx.fillRect(star.x, star.y, star.width, star.height);
+                }
+            });
+            
+            // Draw player
+            ctx.fillStyle = '#3498db';
+            ctx.fillRect(player.x, player.y, player.width, player.height);
+        }
+        
+        // Game over function
+        function gameOver() {
+            gameRunning = false;
+            finalScoreElement.textContent = score;
+            gameOverElement.style.display = 'block';
+        }
+        
+        // Reset game function
+        function resetGame() {
+            // Reset player
+            player.x = 100;
+            player.y = 100;
+            player.velocityX = 0;
+            player.velocityY = 0;
+            player.lives = 3;
+            
+            // Reset stars
+            stars.forEach(star => {
+                star.collected = false;
+            });
+            
+            // Reset score and lives
+            score = 0;
+            scoreElement.textContent = score;
+            livesElement.textContent = player.lives;
+            
+            // Reset time limit
+            lastStarTime = performance.now();
+            
+            // Reset game state
+            gameRunning = true;
+            gameOverElement.style.display = 'none';
+        }
+        
+        // Game loop
+        function gameLoop(timestamp) {
+            updatePlayer(timestamp);
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // Start game
+        lastStarTime = performance.now();
+        gameLoop();
+    </script>
+</body>
+</html>
