@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Draw & Rescue Game</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f5f5;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+        
+        .game-container {
+            position: relative;
+            display: inline-block;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            background: white;
+        }
+        
+        canvas {
+            display: block;
+            background: white;
+        }
+        
+        .ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            right: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 10;
+        }
+        
+        .buttons {
+            display: flex;
+            gap: 10px;
+        }
+        
+        button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 5px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .play-btn {
+            background: #4CAF50;
+            color: white;
+        }
+        
+        .clear-btn {
+            background: #f44336;
+            color: white;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        }
+        
+        .instructions {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            right: 10px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 14px;
+            color: #333;
+            text-align: center;
+            z-index: 10;
+        }
+        
+        .goal {
+            position: absolute;
+            bottom: 40px;
+            right: 40px;
+            width: 80px;
+            height: 80px;
+            background: rgba(76, 175, 80, 0.3);
+            border: 2px dashed #4CAF50;
+            border-radius: 50%;
+            z-index: 5;
+        }
+        
+        .goal-text {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            font-size: 12px;
+            color: #4CAF50;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1>Draw & Rescue</h1>
+    <div class="game-container">
+        <div class="ui">
+            <div class="buttons">
+                <button class="play-btn" onclick="startGame()">Play</button>
+                <button class="clear-btn" onclick="clearLines()">Clear Lines</button>
+            </div>
+        </div>
+        <canvas id="gameCanvas" width="800" height="600"></canvas>
+        <div class="goal"></div>
+        <div class="goal-text">Goal</div>
+        <div class="instructions">
+            Instructions: Draw lines by clicking and dragging to create ramps/bridges. Click "Play" to drop the ball. Guide it to the green goal zone.
+        </div>
+    </div>
+    
+    <script>
+        // Matter.js modules
+        const { Engine, Render, Runner, Bodies, Composite, Mouse, MouseConstraint, Body } = Matter;
+        
+        // Create engine
+        const engine = Engine.create();
+        
+        // Create render
+        const render = Render.create({
+            element: document.querySelector('.game-container'),
+            engine: engine,
+            canvas: document.getElementById('gameCanvas'),
+            options: {
+                width: 800,
+                height: 600,
+                wireframes: false,
+                background: 'white'
+            }
+        });
+        
+        // Create runner
+        const runner = Runner.create();
+        
+        // Create mouse constraint for drawing
+        const mouse = Mouse.create(render.canvas);
+        const mouseConstraint = MouseConstraint.create(engine, {
+            mouse: mouse,
+            constraint: {
+                stiffness: 0.2,
+                render: {
+                    visible: false
+                }
+            }
+        });
+        
+        // Add mouse constraint to world
+        Composite.add(engine.world, mouseConstraint);
+        
+        // Set mouse as render mouse
+        render.mouse = mouse;
+        
+        // Create static bodies
+        const ground = Bodies.rectangle(400, 600, 800, 50, {
+            isStatic: true,
+            render: {
+                fillStyle: '#e0e0e0'
+            }
+        });
+        
+        const leftWall = Bodies.rectangle(0, 300, 50, 600, {
+            isStatic: true,
+            render: {
+                fillStyle: '#e0e0e0'
+            }
+        });
+        
+        const rightWall = Bodies.rectangle(800, 300, 50, 600, {
+            isStatic: true,
+            render: {
+                fillStyle: '#e0e0e0'
+            }
+        });
+        
+        const platform = Bodies.rectangle(200, 200, 200, 20, {
+            isStatic: true,
+            render: {
+                fillStyle: '#e0e0e0'
+            }
+        });
+        
+        // Create ball (character)
+        const ball = Bodies.circle(200, 150, 20, {
+            restitution: 0.6,
+            friction: 0.1,
+            render: {
+                fillStyle: '#f44336'
+            }
+        });
+        
+        // Disable gravity initially
+        engine.world.gravity.y = 0;
+        
+        // Create goal zone
+        const goal = Bodies.circle(700, 500, 40, {
+            isStatic: true,
+            isSensor: true,
+            render: {
+                visible: false
+            }
+        });
+        
+        // Add bodies to world
+        Composite.add(engine.world, [ground, leftWall, rightWall, platform, ball, goal]);
+        
+        // Drawing variables
+        let isDrawing = false;
+        let startX, startY;
+        const drawnBodies = [];
+        
+        // Mouse events for drawing
+        render.canvas.addEventListener('mousedown', (e) => {
+            const rect = render.canvas.getBoundingClientRect();
+            startX = e.clientX - rect.left;
+            startY = e.clientY - rect.top;
+            isDrawing = true;
+        });
+        
+        render.canvas.addEventListener('mousemove', (e) => {
+            if (!isDrawing) return;
+        });
+        
+        render.canvas.addEventListener('mouseup', (e) => {
+            if (!isDrawing) return;
+            
+            const rect = render.canvas.getBoundingClientRect();
+            const endX = e.clientX - rect.left;
+            const endY = e.clientY - rect.top;
+            
+            // Calculate line properties
+            const length = Math.sqrt(Math.pow(endX - startX, 2) + Math.pow(endY - startY, 2));
+            const angle = Math.atan2(endY - startY, endX - startX);
+            
+            // Create line body
+            const line = Bodies.rectangle(
+                (startX + endX) / 2,
+                (startY + endY) / 2,
+                length,
+                10,
+                {
+                    isStatic: true,
+                    angle: angle,
+                    render: {
+                        fillStyle: '#333',
+                        lineWidth: 2
+                    }
+                }
+            );
+            
+            // Add line to world and tracked bodies
+            Composite.add(engine.world, line);
+            drawnBodies.push(line);
+            
+            isDrawing = false;
+        });
+        
+        // Game functions
+        function startGame() {
+            // Enable gravity for the entire world
+            engine.world.gravity.y = 1;
+        }
+        
+        function clearLines() {
+            // Remove all drawn bodies
+            Composite.remove(engine.world, drawnBodies);
+            drawnBodies.length = 0;
+            
+            // Reset ball position
+            Body.setPosition(ball, { x: 200, y: 150 });
+            Body.setVelocity(ball, { x: 0, y: 0 });
+            
+            // Disable gravity
+            engine.world.gravity.y = 0;
+        }
+        
+        // Check for goal collision
+        Matter.Events.on(engine, 'collisionStart', (event) => {
+            event.pairs.forEach((pair) => {
+                if ((pair.bodyA === ball && pair.bodyB === goal) || 
+                    (pair.bodyA === goal && pair.bodyB === ball)) {
+                    alert('You win!');
+                    clearLines();
+                }
+            });
+        });
+        
+        // Run engine and render
+        Runner.run(runner, engine);
+        Render.run(render);
+    </script>
+</body>
+</html>
